@@ -1,0 +1,219 @@
+#Project Overview
+Proyek ini merupakan proyek dashboard Business Intelligence yang berfungsi untuk mempermudah Departement Marketing & Sales 
+dalam melakukan monitoring dan evaluasi terhadap kinerja toko. Saat ini laporan penjualan dilakukan secara manual menggunakan 
+Microsoft Excel yang dikirim secara harian dan diolah oleh PIC Depatment Marketing & Sales. Di akhir bulan, data akan diolah kembali 
+untuk ditampilkan sebagai laporan sales bulanan. Dalam proyek ini akan dilakukan penarikan, pembersihan dan standarisasi data penjualan
+setiap cabang Superstore yang menggantikan proses manual yang dilakukan, untuk ditampilkan di dashboard penjualan secara berkala dalam rentang 
+waktu harian, bulanan, quartal, dan tahunan.
+
+#Project Objectives
+Pembuatan dashboard ini bertujuan untuk menggantikan proses pelaporan manual yang selama ini dilakukan Departemen Marketing & Sales Superstore 
+serta memudahkan seluruh branch manager dan region manager yang bertugas untuk melakukan monitoring dan evaluasi pejualan di masing-masing cabang 
+toko secara harian, bulanan, quartal dan tahunan. Setiap branch manager, region manager, maupun department Marketing dan Sales pusat juga dapat melakukan 
+monitoring penjualan secara langsung sehingga proses konsolidasi dan analisa terhadap strategi atau performa penjualan dapat dilakukan dengan lebih cepat 
+karena pelaporan sudah ditampilkan secara otomatis di dashboard tanpa melalui proses report manual. Detail database yang diharapkan adalah sebagai berikut.
+●  Kemampuan monitoring penjualan setiap toko cabang.
+●  Kemampuan monitoring pencapaian actual vs target monthly, quarterly dan yearly ( dengan asumsi target tahunan = sales tahun lalu + (sales tahun lalu * 10%)
+●  Kemampuan monitoring kerugian per produk dan per toko cabang
+●  Kemampuan segmentasi customer yang berbelanja: Bronze < USD 200, USD 200 < Silver < USD 500, Gold > USD 500 /3 bulan.
+●  Kemampuan segmentasi toko cabang dengan omzet : Kategori I  < USD 1000 , USD 1000 < Kategori II < USD 2000 , Kategori III   > USD 2000 /bulan.
+●  Kemampuan segmentasi produk dengan penjualan : 3nd Product < 5 , 5 < 2nd Product < 10 , 1st Product > 10 /bulan secara per toko dan per regional.
+
+#Tahap Pertama yakni pembersihan data terlebih dahulu
+
+#Tabel Order (Pada tabel ini terdapat data null dan pada kolom Region terdapat incosistent data)
+with hiya as (SELECT Row_ID,	Order_ID,	Order_Date,	Ship_Date,	Ship_Mode	,Customer_ID	,Country	,City,	State,	Postal_Code, 
+replace (Region, 'Southn', 'South') as Region,	Product_ID,	Sales,	Quantity,	Discount,	Profit
+FROM `bie-wave-6.Gold_Challenge.Orders`
+where Row_ID is not null)
+Select * from hiya
+order by Row_ID
+
+#Tabel Categories (Pada tabel ini terdapat incosistant data, duplicate, dan perbaikan isi kolom product_name yang seharusnya berupa unique values seperti pada tabel product_id) 
+with hiya as (with tabel as
+(SELECT *
+ from (select product_id 
+              , replace(category,  'Office Supply', 'Office Supplies') as category
+              , sub_category
+              , product_name
+              ,row_number() over(partition by product_id) as row_num FROM `bie-wave-6.Gold_Challenge.Categories`)
+              ) 
+select  
+    product_id 
+    ,category 
+    ,sub_category
+    ,product_name
+from Tabel
+where
+    1=1
+    and  row_num = 1)
+
+SELECT  product_id 
+    ,category 
+    ,sub_category
+    ,concat(product_id,' ',product_name) as product_name
+     FROM hiya
+     order by 1
+ 
+#Tabel Customer (Tabel ini sudah memiliki kualitas data yang baik sehingga tidak perlu diperbaiki)
+
+
+#Tahap Selanjutnya, yakni tahap ETL untuk menyediakan tabel sesuai dengan kebutuhan Departemen Sales & Marketing
+
+o	Konsolidasi Data Transaksi:(Kemampuan monitoring penjualan setiap toko cabang.)
+SELECT       
+      EXTRACT(year from Order_Date) as Year,
+      EXTRACT(Quarter from Order_Date) as Quarter,
+      EXTRACT(Month from Order_Date) as Month,
+      EXTRACT(Day from Order_Date) as Day,
+      Sum (Quantity) as Total_Penjualan,
+      round (Sum (Sales),2) as  Total_Sales,
+      round (Sum (Profit),2) as Profit,
+FROM  `Current_Detail_Data.Current_DD`
+WHERE Year is not null
+group by ROLLUP(1,2,3,4)
+order by 1,2,3,4
+
+	 
+
+o	Actual vs Budget:(Kemampuan monitoring pencapaian actual vs target monthly, quarterly dan yearly ( dengan asumsi target tahunan = sales tahun lalu + (sales tahun lalu * 10%))
+with Tahun as (
+  select year, null as quarter, null as month,
+       sales, 
+       lag(sales) over(partition by 1 order by year)*1.1 as target 
+from (select extract(year from Order_Date) as year, sum(sales) as sales from `bie-wave-6.Current_Detail_Data.Current_DD`
+group by 1
+order by 1)),
+Quarters as (select year, quarter, null as month, 
+       sales, 
+       lag(sales) over(partition by 1 order by year,quarter)*1.1 as target 
+from (select extract(year from Order_Date) as year,extract(Quarter from Order_Date) as Quarter, sum(sales) as sales from `bie-wave-6.Current_Detail_Data.Current_DD`
+group by 1,2
+order by 1,2)),
+Bulan as (select year, quarter,month, 
+       sales, 
+       lag(sales) over(partition by 1 order by year,quarter,month)*1.1 as target 
+from (select extract(year from Order_Date) as year,extract(Quarter from Order_Date) as Quarter, extract(month from Order_Date) as month, sum(sales) as sales from `bie-wave-6.Current_Detail_Data.Current_DD`
+group by 1,2,3
+order by 1,2,3))
+select * from Tahun
+Union all
+select * from Quarters
+union all 
+select * from Bulan
+order by year, quarter, month
+
+ 
+
+o	Growth:
+with
+ Sales_year as(
+SELECT EXTRACT(year from Order_Date) as Year,
+        round (Sum (Sales),1) as Total_sales
+   from `Current_Detail_Data.Current_DD` 
+GROUP BY 1)
+
+SELECT *,
+round ((Total_sales-lag(total_sales) over (order by Year ASC)) / lag(total_sales) over (order by Year ASC)*100,2) as Growth_Year
+from  Sales_year
+order by Year asc
+
+ 
+●	#growth Quarter
+with
+ Sales_Quarter as(
+SELECT  EXTRACT(Year from Order_Date) as Year,
+        EXTRACT(Quarter from Order_Date) as Quarter,
+        round (Sum (Sales),1) as Total_sales
+   from `Current_Detail_Data.Current_DD`  
+GROUP BY 1,2)
+
+SELECT *,
+        Round((Total_sales-LAG(Total_sales) OVER (ORDER BY Year, Quarter asc)) / LAG(Total_sales) OVER (ORDER BY Year, Quarter asc)*100,2) as Growth_Rate
+        FROM Sales_Quarter
+        order by Year, Quarter asc
+Result:
+ 
+
+
+●	#growth Month
+with
+ Sales_Month as(
+SELECT  EXTRACT(Year from Order_Date) as Year,
+        EXTRACT(Month from Order_Date) as Month,
+        round (Sum (Sales),1) as Total_sales
+   from `Current_Detail_Data.Current_DD`
+GROUP BY 1,2)
+
+SELECT *,
+        Round((Total_sales-LAG(Total_sales) OVER (ORDER BY Year, Month asc)) / LAG(Total_sales) OVER (ORDER BY Year, Month asc)*100,2) as Growth_Rate
+        FROM Sales_Month
+        order by Year, Month asc
+Result:
+ 
+o	Loss Reporting:
+	Query :
+	Select  Year as Tahun, 
+        Quarter as Kuarter, 
+        month as Bulan,
+        Region as Toko_Cabang, 
+        Product_Name as Produk, 
+        Round(SUM(Profit),1) As Kerugian
+From `bie-wave-6.Current_Detail_Data.Current_DD`
+where Profit < 0
+Group by 1,2,3,4,5
+order by 1,2,3
+
+	 
+
+
+
+o	Segmentasi Customer:
+	Query :
+	with Segment as  (select 
+                          Year As Tahun, 
+                          Quarter  As Kuarter, 
+                          Customer_Name As Nama,
+                          round(sum(sales),2) as Belanja,
+from `bie-wave-6.Current_Detail_Data.Current_DD`
+group by 1,2,3)
+SELECT Tahun, Kuarter, Nama,
+case 
+ 	 when belanja > 500 then 'Gold'
+ 	 when belanja Between 200 and 500 then 'Silver'
+ 	 Else 'Bronze'
+  End As Kelas
+from Segment 
+order by 1,2
+
+ 
+o	Segmentasi Product:
+	Query :
+	With Tabel As (SELECT year As Tahun, Month As Bulan, Region, sum(Quantity) as penjualan, Product_Name,
+case 
+  when sum(Quantity) > 10 then '1st Product'
+ 	 when sum(Quantity) Between 5 and 10 then '2nd Product'
+  Else '3rd Product'
+  End As Kelas
+from `bie-wave-6.Current_Detail_Data.Current_DD`
+group by 1,2,3,5
+order by 1)
+Select Tahun, Bulan, Region, Product_Name, Kelas
+from Tabel
+order by 1,2,5
+
+o	Segmentasi Toko Cabang:
+	Query:
+	With Tabel As (SELECT year As Tahun, Month As Bulan, round(sum(Sales),2) as Omset, City,
+case 
+  when round(sum(Sales),2) > 2000 then 'Kategori III'
+  when round(sum(Sales),2) Between 1000 and 2000 then 'Kategori II'
+  Else 'Kategori I'
+  End As Kategori
+from `bie-wave-6.Current_Detail_Data.Current_DD`
+group by 1,2,4
+order by 1,2 )
+Select Tahun, Bulan, City, Kategori
+from Tabel
+where Tahun is not null
+order by 1, 2 asc
