@@ -1,0 +1,5 @@
+#Day 1 : Line continuation characters in Python
+print ('I am new here, but i will try my best to improve it')
+print("I am new here\
+      but i will try my best to improve it,\
+      Tadaaa, Day 2 i am coming")
