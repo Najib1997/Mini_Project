@@ -1,0 +1,19 @@
+with clean as (
+  SELECT 
+  Row_ID
+  ,Order_ID
+  ,Order_Date
+  ,Ship_Date
+  ,Ship_Mode	
+  ,Customer_ID	
+  ,Country	
+  ,City
+  ,State
+  ,Postal_Code
+  ,replace (Region, 'Southn', 'South') as Region
+  ,Product_ID
+  ,Sales,	Quantity,	Discount,	Profit
+FROM `bia-12.Superstore.Order` 
+where Row_ID is not null)
+Select * from clean
+order by Row_ID
